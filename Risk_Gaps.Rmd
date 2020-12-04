@@ -1,0 +1,1311 @@
+---
+title: "Questionnaire. What we Have"
+author: "Simy"
+date: "23/09/2019"
+output: html_document
+---
+
+```{r setup}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Agenda
+
+
+In this Document i hope to be able to also point to which claims i feel we can make based on the data we have.
+The question that arises is: where do we go from here?
+
+# Questionnaire
+
+Here i look at the Questionnaire Data which has been reconstrcuted from the SQL Database behind my experiment.
+I used [This Script](TidyUpQuestions.Rmd) to get useful Data.
+
+
+```{r}
+#Sourcing.
+library(tidyverse)
+library(here)
+#source("../OCU_Clean/C_Fit_BraamsData/Helpers/Start_Workflow.R") 
+library(bayesplot)
+library(cowplot)
+library(viridis)
+library(grid)
+library(gridExtra)
+library(Hmisc)
+library(bridgesampling)
+library(ggridges)
+library(tidybayes)
+library(loo)
+library(brms)
+#library(kableExtra)
+library(knitr)
+library(devtools)
+#devtools::install_github('m-clark/lazerhawk')
+
+theme_set(theme_cowplot())
+#DataLoading
+#ARQs<-read.csv("ARQs.csv")
+
+#Function Defining
+split_facets <- function(x) {
+  facet_expr <- unlist(x[["facet"]][["params"]][c("cols", "rows", "facets")])
+  facet_levels <- lapply(facet_expr, rlang::eval_tidy, data = x[["data"]])
+  facet_id <- do.call(interaction, facet_levels)
+  panel_data <- split(x[["data"]], facet_id)
+  plots <- vector("list", length(panel_data))
+  for (ii in seq_along(plots)) {
+    plots[[ii]] <- x
+    plots[[ii]][["data"]] <- panel_data[[ii]]
+    plots[[ii]][["facet"]] <- facet_null()
+  }
+  plots
+}
+
+
+
+
+
+# i dont need this anymore
+#rstan_options(auto_write = TRUE) 
+linMap <- function(x, from, to) {
+  # Shifting the vector so that min(x) == 0
+  x <- x - min(x)
+  # Scaling to the range of [0, 1]
+  x <- x / max(x)
+  # Scaling to the needed amplitude
+  x <- x * (to - from)
+  # Shifting to the needed level
+  x + from
+}
+# this transforms my age regressors.
+#ARQs<-readRDS("A_RawData/ARQs.rds")
+
+ARQs<-readRDS("A_RawData/ARQs.rds")
+
+ARQs$age=as.numeric(as.character(ARQs$age))
+# here i bring the quadratic and linear age onto the same scale as the other predictors, so that we can better interpret theplot()
+#Betas.
+ARQs$LinearAgeTrans<-(poly(ARQs$age,2)[,1])
+ARQs$QuadraticAgeTrans<-(poly(ARQs$age,2)[,2]*-1)
+
+#TidyQuestionnaireLongSums$TestPart
+#TidyQuestionnaireLongSums<-
+# get only the Sumscores
+
+# some datawrangling
+normalEng<-ARQs%>%mutate(DiffEng=(HowOften-Recom)
+)%>%mutate(
+  NormalizedDiffEng=as.vector(scale(DiffEng)),
+  Bin= case_when(
+    age<=13~1,
+    (age<=15 & age>13)~2,
+    (age<=17 & age>15)~2,
+    (age<=19 & age>17)~3,
+    (age>19)~3
+    #(age>=22)~4
+  ),
+  SubScale=case_when(
+    Scale=="Rebellious"~"Rebellious",
+    Scale=="Reckless"~"Reckless",
+    Scale=="Antisocial"~"Antisocial",
+    Scale=="Thrill_Seeking"~"Thrill Seeking"
+  ),
+  Presence=case_when(
+    Scale=="Rebellious"~"A",
+    Scale=="Reckless"~"A",
+    Scale=="Antisocial"~"A",
+    Scale=="Thrill_Seeking"~"B"
+  ),
+  Bin=as.factor(Bin)
+)
+
+ggplot2::theme_set(theme_cowplot())
+
+
+write_csv(x = normalEng%>%select(subject,age,sex)%>%unique(), path = "A_RawData/Demographics.csv")
+
+```
+
+
+
+# Look at Raw Data. 
+
+If we devide the data into thrill seeking and not thrill seeking risks, it indeed looks like something quadratic is going on with age. The line you see is "loess".
+
+```{r,fig.height=4,fig.width=5}
+normalEng%>%select(HowOften,Recom,DiffEng,NormalizedDiffEng,HowMany,subject,age,sex,Scale,Bin,Presence,SubScale)%>%
+  gather(key="Diff",value=Response,HowOften,Recom)%>%filter(Presence=="A")%>%
+  ggplot(aes(y=(as.numeric(Response)),x=age,group=Diff))+
+  geom_jitter(aes(color=Scale,shape=Diff),alpha=0.3,size=1)+
+  geom_smooth(method="loess")+
+  #stat_summary(aes(linetype=Diff), geom="line",fun.y="mean",size=3)+
+  stat_summary(aes(shape=Diff),fun.data = mean_cl_boot, geom = "pointrange",position=position_dodge(1),size=1)+
+  guides(color=FALSE)+
+  ylab(expression(paste("Rating")))+
+  scale_color_viridis_d(name="ARQ Subscale")+#breaks=c("HowOften","Recom"),labels=c("\n Willingness to \n Engage \n","\n Willingness to \n Recommend \n"))+
+  scale_linetype_discrete(name="Mean",breaks=c("HowOften","Recom"),labels=c("\n Propensity to \n engage \n","\n Propensity to \n recommend \n"))+
+  scale_shape_manual(name="",breaks=c("HowOften","Recom","HowMany"),labels=c("\n Propensity to \n engage \n","\n Propensity to \n recommend \n","How Many Others"),values=c(0, 8,10))+
+  scale_x_continuous(name="Age")+
+  # scale_shape_manual()+
+  guides(size=0.1)+ggtitle("Engagement in \nand recommendation of \nundesirable risky behaviors")->UnDesirableRaw
+
+
+normalEng%>%select(HowOften,Recom,DiffEng,HowMany,NormalizedDiffEng,subject,age,sex,Scale,Bin,Presence,SubScale)%>%group_by(HowMany)%>%gather(key="Diff",value=Response,HowOften,Recom)%>%filter(Presence=="B")%>%
+  ggplot(aes(y=(as.numeric(Response)),x=age,group=Diff))+
+  geom_jitter(aes(color=Scale,shape=Diff),alpha=0.3,size=1)+
+  geom_smooth(method="loess")+
+  #  stat_summary(aes(linetype=Diff), geom="line",fun.y="mean",size=3)+
+  stat_summary(aes(shape=Diff),fun.data = mean_cl_boot, geom = "pointrange",color="black",position=position_dodge(0.3),size=1)+
+  guides(color=FALSE)+
+  ylab(expression(paste("Rating")))+
+  scale_color_discrete(name="ARQ Subscale")+#breaks=c("HowOften","Recom"),labels=c("\n Willingness to \n Engage \n","\n Willingness to \n Recommend \n"))+
+  scale_linetype_discrete(name="Mean",breaks=c("HowOften","Recom"),labels=c("\n Propensity to \n engage \n","\n Propensity to \n recommend \n"))+
+  scale_shape_manual(name="",breaks=c("HowOften","Recom"),labels=c("\n Propensity to \n engage \n","\n Propensity to \n recommend \n"),values=c(0, 8))+
+  scale_x_continuous(name="Age")+
+  guides(size=0.1)+ggtitle("Engagement in \nand recommendation of \ndesirable risky behaviors")->DesirableRaw
+
+
+print(UnDesirableRaw)
+ggsave("RiskyTalk.pdf")
+
+print(DesirableRaw)
+
+
+```
+
+```{r, echo=FALSE,results='hide'}
+#this is t-test prepareation on the difference value.
+
+library(rstan)
+library(bridgesampling)
+#whatsthat=load("A_RawData/Questionnaire_Data.RData")
+subSet=c("A","B","C","D")
+
+for(i in 1:4) { 
+  nam <- paste(subSet[i], "_dataList", sep = "")
+  TtestData<-ARQs%>%
+    mutate(DiffEng=(HowOften-Recom))%>%
+    mutate(
+    NormalizedDiffEng=as.vector(scale(DiffEng)),
+    SubScale=case_when(
+      Scale=="Rebellious"~"A",
+      Scale=="Reckless"~"B",
+      Scale=="Antisocial"~"C",
+      Scale=="Thrill_Seeking"~"D"
+    ),
+    Presence=case_when(
+      Scale=="Rebellious"~"A",
+      Scale=="Reckless"~"A",
+      Scale=="Antisocial"~"A",
+      Scale=="Thrill_Seeking"~"B"
+    )
+  )%>%select(DiffEng,NormalizedDiffEng,subject,age,sex,Scale,Presence,SubScale)%>%
+    filter(SubScale==subSet[i])%>%
+    gather(key="Diff",value=Response,NormalizedDiffEng)
+  
+  age=unique(TtestData$age)
+  nAges=length(age)
+  sublistResponse=1:length(age)
+  for (i in 1:length(age)){
+    sublistResponse[i]=length((TtestData[TtestData$age==age[i],]$age))
+  }
+  maxtrials=max(sublistResponse)
+  resp    <- array(0.5, c(maxtrials,length(age)))#Other Chose Risk?
+  # make sure only to use the completed respnses
+  for (i in 1:length(age)) {
+    curSubj      <- age[i]
+    useTrials    <- sublistResponse[i]
+    resp[1:useTrials,i]    <- TtestData[TtestData$age==curSubj,]$Response
+  }
+  resp=TtestData$Response
+  #assign(nam, list(y = resp,n = maxtrials,ages=age,nAges=nAges,Tsubj=sublistResponse, r = 1/sqrt(2)))
+  assign(nam, list(y = resp,n = length(resp), r = 1/sqrt(2)))
+
+}
+
+```
+
+# models
+```{r}
+stancodeH0 <- '
+data {
+  int<lower=1> n; // number of observations
+  vector[n] y; // observations
+}
+parameters {
+  real<lower=0> sigma2; // variance parameter
+}
+model {
+  target += log(1/sigma2); // Jeffreys prior on sigma2
+  target += normal_lpdf(y | 0, sqrt(sigma2)); // likelihood
+}
+'
+
+stancodeH1 <- '
+data {
+  int<lower=1> n; // number of observations
+  vector[n] y; // observations
+  real<lower=0> r; // Cauchy prior scale
+}
+parameters {
+  real delta;
+  real<lower=0> sigma2;// variance parameter
+}
+model {
+  target += cauchy_lpdf(delta | 0, r); // Cauchy prior on delta
+  target += log(1/sigma2); // Jeffreys prior on sigma2
+  target += normal_lpdf(y | delta*sqrt(sigma2), sqrt(sigma2));  // likelihood
+}
+'
+
+# compile the model.
+stanmodelH0 <- stan_model(model_code = stancodeH0, model_name="stanmodel")
+stanmodelH1 <- stan_model(model_code = stancodeH1, model_name="AgeDependendEffectSize")
+
+modeldata=list(y = resp,n = maxtrials, r = 1/sqrt(2))
+```
+
+
+# Here i fit the respective effect size models.
+
+```{r results="hide"}
+
+for(i in 1:4) { 
+Data <- paste(subSet[i], "_dataList", sep = "")
+stanfitH1NonDesireable <- sampling(stanmodelH1, data = get(Data),
+                                   iter = 5000, warmup = 1000, chains = 4, cores = 4,
+                                   control = list(adapt_delta = .8)
+                                   )
+
+assign(paste(subSet[i], "_dataFit", sep = ""),stanfitH1NonDesireable)
+}
+
+```
+
+# ROPE
+
+I dont know what that means. So i look at the effect sizes directly. What you can see here is the posterior density of my "effect size models".
+Vertical lines denote the boundaries of a small effect as the Region of Practical Equivalence (ROPE). For this i divide the data into age groups and above i fitted the "effect size model"
+to different age groups. I plot the posterior of the effect size distribution per age group I would treat small effects as practically equivavlent and denote it with vertical lines inside my model.
+
+
+# Look at the "Non Desirable Effect Sizes"
+
+Here i plot the posterior from sampling my effectsize model. This is more informative than bayesfactors. 
+
+```{r}
+A=rstan::extract(A_dataFit)
+B=rstan::extract(B_dataFit)
+C=rstan::extract(C_dataFit)
+D=rstan::extract(D_dataFit)
+
+#library(bigmemory)
+
+stupidDF<-data.frame(
+  Adelta=as.vector(A$delta),
+  Bdelta=as.vector(B$delta),
+  Cdelta=as.vector(C$delta)
+)
+
+
+
+stupidDF%>%gather(key="scale",value="sample")%>%ggplot(aes(x=sample,fill=scale,y=scale))+
+  geom_density_ridges(rel_min_height = 0.01,alpha=0.4,quantiles = c(0.025,0.5, 0.975),quantile_lines = TRUE)+
+  #geom_histogram(bins=1000,position = "dodge",alpha=0.5)+
+  geom_vline(xintercept = 0)+
+  geom_vline(xintercept = 0.1,linetype="dashed")+
+  geom_vline(xintercept = -0.1,linetype="dashed")+
+  scale_fill_viridis_d(name="ARQ Subscale", breaks=c("Adelta","Bdelta","Cdelta","Ddelta"),labels=c("Rebellious","Reckless","Antisocial","Thrill_Seeking"))+
+  scale_x_continuous(name="Posterior effect size")+
+  coord_cartesian(xlim=c(-1,1))+
+  #scale_shape_manual(values=c(9, 8))+
+  scale_y_discrete(name="Density",breaks=c("1","2","3"),labels=c(NULL,NULL,NULL))+
+  ggtitle("Engage > recommend\nundesirable")+theme(
+    plot.title = element_text(hjust = 0.5)
+  )->UndesirableEffects
+
+print(UndesirableEffects)
+```
+
+# What about Desirable Effectsizes?
+
+```{r}
+
+data.frame(
+    Ddelta=as.vector(D$delta)
+  # NonDesireable$delta,
+)%>%gather(key="scale",value="sample")%>%ggplot(aes(x=sample,fill=scale,y=scale))+#geom_histogram(bins=1000,position = "dodge",alpha=0.5)+
+  geom_density_ridges(rel_min_height = 0.01,alpha=0.4,quantiles = c(0.025,0.5, 0.975),quantile_lines = TRUE)+
+  geom_vline(xintercept = 0)+
+  geom_vline(xintercept = 0.1,linetype="dashed")+
+  geom_vline(xintercept = -0.1,linetype="dashed")+
+  scale_shape_manual(values=c(9, 8))+
+  coord_cartesian(xlim=c(-1,1))+
+  scale_fill_discrete(name="ARQ Subscale",breaks=c("Ddelta"),labels=c("Thrill seeking"))+
+  scale_x_continuous(name="Posterior effect size",limits = c(-1.2,1.2))+
+  scale_y_discrete(name="Density",breaks=c("1","2","3"),labels=c(NULL,NULL,NULL))+
+  ggtitle("Engage > recommend\n desirable")+theme(
+    plot.title = element_text(hjust = 0.5)
+  )->DesirableEffecs
+print(DesirableEffecs)
+
+```
+
+
+# Make one Plot
+
+Here i glue everything together in a plot for everything. 
+
+```{r fig.height=10,fig.width=10}
+Oi=get_legend(UnDesirableRaw+theme(legend.position="bottom",legend.box = "vertical"))
+OiOi=get_legend(DesirableRaw)
+
+SummaryPlot<-cowplot::plot_grid(UnDesirableRaw,NULL,DesirableRaw,
+                   NULL,NULL,NULL,
+                   UndesirableEffects,NULL,DesirableEffecs,
+                   nrow=3,
+                   ncol=3,
+                   rel_widths = c(1,0.01,1),
+                   rel_heights = c(1,0.1,0.4),
+                   align = "v",
+                   labels = c("a","","b","","","","c","","d")
+)
+
+# this just floats over the legend to make it look
+rect <- rectGrob(
+  x = unit(3.3, "in"),
+  y = unit(1, "npc") - unit(1, "in"),
+  width = unit(1.8, "in"),
+  height = unit(2, "in"),
+  hjust = 0, vjust = 2,
+  gp = gpar(fill = "white",col=NA),
+)
+
+ggdraw(SummaryPlot) +
+  draw_grob(rect)
+
+
+ggsave(filename = "X_Figures/BestSummaryPlotEver.png",width = 10,height = 10)
+```
+
+## Interaction?
+Our idea was that adolescence is a particular period during which peer influence is extermley important for risk taking. We therefore we also asked subjects to indicate how many others in their peer group engage in this sort of behavior. I did not plot the "others" repsonse there, but an interaction between the amount of others and age could maybe explain this.
+
+So in the following i plot the interaction without stats. In the different panels you can see the mean Subject responses (could range from 0 to 5) to the different scenarios with different facets per questionnaire subscale. On the x Axis we still see age. It indeed seems like there is something going on with age, but if anything it looks more like a linear not a quadratic interaction (These plots were the reason why i doubted the model predictions in the first place, they tell a very different story). 
+
+```{r fig.height=10, fig.width=20}
+
+normalEng%>%select(HowOften,Recom,DiffEng,NormalizedDiffEng,HowMany,subject,age,sex,Scale,Bin,Presence,SubScale)%>%group_by(HowMany)%>%
+  gather(key="Diff",value=Response,HowOften,Recom)%>%filter(Presence=="A")%>%
+  ggplot(aes(y=(as.numeric(Response)),x=age,group=Diff))+
+  geom_jitter(aes(color=Scale,shape=Diff),alpha=0.3)+
+  geom_smooth(method="loess")+
+  #stat_summary(aes(linetype=Diff), geom="line",fun.y="mean",size=3)+
+  stat_summary(aes(shape=Diff),fun.data = mean_cl_boot, geom = "pointrange",position=position_dodge(1))+
+  guides(color=FALSE)+
+  ylab(expression(paste("Response")))+
+  scale_color_viridis_d(name="ARQ Subscale")+#breaks=c("HowOften","Recom"),labels=c("\n Willingness to \n Engage \n","\n Willingness to \n Recommend \n"))+
+  scale_linetype_discrete(name="Mean",breaks=c("HowOften","Recom"),labels=c("\n Willingness to \n Engage \n","\n Willingness to \n Recommend \n"))+
+  scale_shape_manual(name="",breaks=c("HowOften","Recom","HowMany"),labels=c("\n Willingness to \n Engage \n","\n Willingness to \n Recommend \n","How Many Others"),values=c(0, 8,10))+
+  scale_x_continuous(name="Age")+
+  # scale_shape_manual()+
+  guides(size=0.1)+ggtitle("Engagement in & Recommendation of Non Desirable Risky Behaviors")+facet_grid(~HowMany)
+
+
+normalEng%>%select(HowOften,Recom,DiffEng,HowMany,NormalizedDiffEng,subject,age,sex,Scale,Bin,Presence,SubScale)%>%group_by(HowMany)%>%
+  gather(key="Diff",value=Response,HowOften,Recom)%>%filter(Presence=="B")%>%
+  ggplot(aes(y=(as.numeric(Response)),x=age,group=Diff))+
+  geom_jitter(aes(color=Scale,shape=Diff),alpha=0.3,size=1)+
+  geom_smooth(method="loess")+
+  #  stat_summary(aes(linetype=Diff), geom="line",fun.y="mean",size=3)+
+  stat_summary(aes(shape=Diff),fun.data = mean_cl_boot, geom = "pointrange",color="black",position=position_dodge(0.3),size=1)+
+  guides(color=FALSE)+
+  ylab(expression(paste("Response")))+
+  scale_color_discrete(name="ARQ Subscale")+#breaks=c("HowOften","Recom"),labels=c("\n Willingness to \n Engage \n","\n Willingness to \n Recommend \n"))+
+  scale_linetype_discrete(name="Mean",breaks=c("HowOften","Recom"),labels=c("\n Willingness to \n Engage \n","\n Willingness to \n Recommend \n"))+
+  scale_shape_manual(name="",breaks=c("HowOften","Recom"),labels=c("\n Willingness to \n Engage \n","\n Willingness to \n Recommend \n"),values=c(0, 8))+
+  scale_x_continuous(name="Age")+
+  guides(size=0.1)+ggtitle("Engagement in & Recommendation of Desirable (Recreational) Risky Behaviors")+facet_grid(~HowMany)
+
+#print(normalEng)
+```
+
+# What do the Stats say?
+
+Before there was a barely credible Quadratic_Age x Social Interaction. Considering all subjects this is interaction is not credible anymore.
+The rest stays qualtiatively the same.
+
+## Undesirable Risks
+```{r}
+
+library(knitr)
+library(kableExtra)
+MultivariateUnDesirableQuadraticC<-readRDS("B_ModelFits/MultiNoThrillSeekQuadLinLinMapC.rds")
+
+
+knitr::kable(lazerhawk::brms_SummaryTable(MultivariateUnDesirableQuadraticC)) %>%
+  kableExtra::kable_styling() 
+
+```
+
+##Desirable Risks
+
+```{r}
+MultivariateDesirableQuadraticC<-readRDS("B_ModelFits/MultiThrillSeekQuadLinLinMapC.rds")
+
+knitr::kable(lazerhawk::brms_SummaryTable(MultivariateDesirableQuadraticC)) %>%
+  kableExtra::kable_styling()
+```
+
+# Cronbachs Alpha for Propensity to Engage
+
+```{r}
+options(digits = 2)
+normalEng%>%pivot_wider(id_cols = "subject",names_from = "Sub_Scale",values_from = HowOften)->HowOften
+alpha(HowOften%>%select(!subject))[[2]]%>%as.data.frame()%>%rownames_to_column()%>%mutate(rowname=case_when(
+  rowname=="Antisocial_1"~"Overeating",
+  rowname=="Antisocial_2"~"Teasing people",
+  rowname=="Antisocial_3"~"Cheating",
+  rowname=="Antisocial_4"~"Talking to Strangers",
+  rowname=="Antisocial_5"~"Sniffing Gas or Glue",
+  rowname=="Rebellious_1"~"Drinking",
+  rowname=="Rebellious_2"~"Smoking",
+  rowname=="Rebellious_3"~"Getting Drunk",
+  rowname=="Rebellious_4"~"Drugs",
+  rowname=="Rebellious_5"~"Staying out late",
+  rowname=="Reckless_1"~"Drinking and driving",
+  rowname=="Reckless_2"~"Stealing",
+  rowname=="Reckless_3"~"Unprotected sex",
+  rowname=="Reckless_4"~"Speeding",
+  rowname=="Reckless_5"~"Driving without a license",
+  rowname=="Thrill_Seeking_1"~"Leaving School",
+  rowname=="Thrill_Seeking_2"~"Inline Skating",
+  rowname=="Thrill_Seeking_3"~"Parachuteing",
+  rowname=="Thrill_Seeking_4"~"Flying a Plane",
+  rowname=="Thrill_Seeking_5"~"Entering a competition",
+  rowname=="Thrill_Seeking_6"~"Martial Arts",
+  rowname=="Thrill_Seeking_7"~"Skiing"
+))%>%kableExtra::kable()%>%kableExtra::save_kable(file = "Propensity_To_Engage.html")
+                                                                                        
+```
+looks good.
+
+#Cornbachs Alpha for Propensity to Recommend
+
+```{r}
+options(digits = 2)
+normalEng%>%pivot_wider(id_cols = "subject",names_from = "Sub_Scale",values_from = Recom)->Recom
+alpha(Recom%>%select(!subject))[[2]]%>%as.data.frame()%>%rownames_to_column()%>%mutate(rowname=case_when(
+  rowname=="Antisocial_1"~"Overeating",
+  rowname=="Antisocial_2"~"Teasing people",
+  rowname=="Antisocial_3"~"Cheating",
+  rowname=="Antisocial_4"~"Talking to Strangers",
+  rowname=="Antisocial_5"~"Sniffing Gas or Glue",
+  rowname=="Rebellious_1"~"Drinking",
+  rowname=="Rebellious_2"~"Smoking",
+  rowname=="Rebellious_3"~"Getting Drunk",
+  rowname=="Rebellious_4"~"Drugs",
+  rowname=="Rebellious_5"~"Staying out late",
+  rowname=="Reckless_1"~"Drinking and driving",
+  rowname=="Reckless_2"~"Stealing",
+  rowname=="Reckless_3"~"Unprotected sex",
+  rowname=="Reckless_4"~"Speeding",
+  rowname=="Reckless_5"~"Driving without a license",
+  rowname=="Thrill_Seeking_1"~"Leaving School",
+  rowname=="Thrill_Seeking_2"~"Inline Skating",
+  rowname=="Thrill_Seeking_3"~"Parachuteing",
+  rowname=="Thrill_Seeking_4"~"Flying a Plane",
+  rowname=="Thrill_Seeking_5"~"Entering a competition",
+  rowname=="Thrill_Seeking_6"~"Martial Arts",
+  rowname=="Thrill_Seeking_7"~"Skiing"
+))%>%kableExtra::kable()%>%kableExtra::save_kable(file = "Propensity_To_Recommend.html")
+```
+looks good too
+another one to please the reviewers
+
+# Inspecting the Model Predictions
+
+After some contemplating i do not think that the beta weights in itself tell me very much about whats actually going on in the data. Or what these estimates actually mean.
+So what i attempt to do here is getting model predictions and plotting them directly assuming two conditions: 
+1) assuming participants rated every behavior to be performed by noone else
+2) assuming every behavior beeing performed by quite a some people
+
+
+```{r,fig.width=20,fig.height=10, eval=F}
+# All<-readRDS("B_ModelFits/MultiLinMap.rds")
+
+library(modelr)
+#MultivariateUndesirableLinearQuadratic%>%spread_draws(b_HowOften_HowMany)%>%
+#  head(10)
+# generate new data.
+
+newdata=expand.grid(
+  Scale=unique(normalEng[normalEng$Scale!="Thrill_Seeking",]$Scale),
+  subject=unique(normalEng$subject),
+  LinearAgeTrans=NaN,
+  QuadraticAgeTrans=NaN,
+  Risk=c(0,1,2,3,4),
+  sex=("Weiblich"),
+  HowMany=c(0,1,2,3,4)# take only extreme things.
+)
+newdata$sex=as.character(newdata$sex)
+newdata$LinearAgeTrans=as.numeric(newdata$LinearAgeTrans)
+newdata$QuadraticAgeTrans=as.numeric(newdata$QuadraticAgeTrans)
+
+for (i in 1:length(unique(newdata$subject))){
+  Sub<-unique(newdata$subject)[i]
+  #print(Sub)
+  Age=normalEng[normalEng$subject==Sub,]$LinearAgeTrans[1]
+  Agesq=normalEng[normalEng$subject==Sub,]$QuadraticAgeTrans[1]
+  Sex=normalEng[normalEng$subject==Sub,]$sex[1]
+  
+  newdata[newdata$subject==Sub,]$LinearAgeTrans=Age
+  newdata[newdata$subject==Sub,]$QuadraticAgeTrans=Agesq
+  newdata[newdata$subject==Sub,]$sex=Sex
+  
+  #normalEng[normalEng$subject==newdata$subject[i],]$LinearAgeTrans[1]
+}
+
+
+newdata$sex=as.factor(newdata$sex)
+na.omit(newdata)->newdata
+
+
+Predictions<-predict(MultivariateUnDesirableQuadraticC, newdata = newdata, re_formula = NULL,
+                     transform = NULL, allow_new_levels = TRUE, summary = TRUE,
+                     probs = c(0.025, 0.975), ntrys = 5)
+
+RecommendPP<-as.data.frame(Predictions[,,1])
+HowOftenPP<-as.data.frame(Predictions[,,2])
+# RecommendPP$Flag="Rec"
+#HowOftenPP$Flag="Often"
+
+colnames(HowOftenPP)<-c("P_HowOften_0","P_HowOften_1","P_HowOften_2","P_HowOften_3","P_HowOften_4")
+colnames(RecommendPP)<-c("P_Recom_0","P_Recom_1","P_Recom_2","P_Recom_3","P_Recom_4")
+# get the actual age back.
+newdata$ActualAge=999
+for (i in 1:length(unique((newdata$subject)))){
+  Sub<-unique(newdata$subject)[i]
+  #print(Sub)
+  Age=normalEng[normalEng$subject==Sub,]$age[1]
+  newdata[newdata$subject==Sub,]$ActualAge=Age
+  #normalEng[normalEng$subject==newdata$subject[i],]$LinearAgeTrans[1]
+}
+
+PosPredData<-cbind(newdata,RecommendPP,HowOftenPP)
+write_rds(PosPredData,"D_Analyze/PosteriorPredictions.rds")
+
+
+
+```
+
+```{r}
+PosPredData<-readRDS("D_Analyze/PosteriorPredictions.rds")
+#PosPredData
+```
+
+
+
+
+```{r,fig.width=20,fig.height=10}
+# All<-readRDS("B_ModelFits/MultiLinMap.rds")
+
+library(modelr)
+#MultivariateUndesirableLinearQuadratic%>%spread_draws(b_HowOften_HowMany)%>%
+#  head(10)
+
+newdataDes=expand.grid(
+  Scale=unique(normalEng[normalEng$Scale=="Thrill_Seeking",]$Scale),
+  subject=unique(normalEng$subject),
+  LinearAgeTrans=NaN,
+  QuadraticAgeTrans=NaN,
+  Risk=c(0,1,2,3,4),
+  sex=("Weiblich"),
+  HowMany=c(0,1,2,3,4)# take only extreme things.
+)
+newdataDes$sex=as.character(newdataDes$sex)
+newdataDes$LinearAgeTrans=as.numeric(newdataDes$LinearAgeTrans)
+newdataDes$QuadraticAgeTrans=as.numeric(newdataDes$QuadraticAgeTrans)
+
+for (i in 1:length(unique(newdataDes$subject))){
+  Sub<-unique(newdataDes$subject)[i]
+  #print(Sub)
+  Age=normalEng[normalEng$subject==Sub,]$LinearAgeTrans[1]
+  Agesq=normalEng[normalEng$subject==Sub,]$QuadraticAgeTrans[1]
+  Sex=normalEng[normalEng$subject==Sub,]$sex[1]
+  
+  newdataDes[newdataDes$subject==Sub,]$LinearAgeTrans=Age
+  newdataDes[newdataDes$subject==Sub,]$QuadraticAgeTrans=Agesq
+  newdataDes[newdataDes$subject==Sub,]$sex=Sex
+  
+  #normalEng[normalEng$subject==newdata$subject[i],]$LinearAgeTrans[1]
+}
+#recode
+newdata$sex=as.factor(newdata$sex)
+na.omit(newdata)->newdata
+#make new predictions
+PredictionsDes<-predict(MultivariateDesirableQuadraticC, newdata = newdataDes, re_formula = NULL,
+                     transform = NULL, allow_new_levels = TRUE, summary = TRUE,
+                     probs = c(0.025, 0.975), ntrys = 5)
+
+RecommendPPDes<-as.data.frame(PredictionsDes[,,1])
+HowOftenPPDes<-as.data.frame(PredictionsDes[,,2])
+# RecommendPP$Flag="Rec"
+#HowOftenPP$Flag="Often"
+
+colnames(HowOftenPPDes)<-c("P_HowOften_0","P_HowOften_1","P_HowOften_2","P_HowOften_3","P_HowOften_4")
+colnames(RecommendPPDes)<-c("P_Recom_0","P_Recom_1","P_Recom_2","P_Recom_3","P_Recom_4")
+# get the actual age back.
+newdataDes$ActualAge=999
+for (i in 1:length(unique((newdataDes$subject)))){
+  Sub<-unique(newdataDes$subject)[i]
+  #print(Sub)
+  Age=normalEng[normalEng$subject==Sub,]$age[1]
+  newdataDes[newdataDes$subject==Sub,]$ActualAge=Age
+  #normalEng[normalEng$subject==newdata$subject[i],]$LinearAgeTrans[1]
+}
+
+PosPredDataEng<-cbind(newdataDes,RecommendPPDes,HowOftenPPDes)
+write_rds(PosPredDataEng,"D_Analyze/PosteriorPredictionsThrill.rds")
+
+#PosPredDataEng<-readRDS("D_Analyze/PosteriorPredictionsThrill.rds")
+```
+
+# What do the Models predict?
+
+Down here is the same plot as above but now for model predictions. I move the predictions from both models into one plot. 
+Looks like it does not do a perfect job at predicting the pattern we actually see in the data, so maybe it is not very well specified after all. 
+
+```{r, fig.width=12,fig.height=10}
+Others <- c(
+  "0" = "very few people \ni know",
+  "1" = "few people \ni know",
+  "2" = "some people \ni know",
+  "3" = "many people \ni know",
+  "4" = "very many people \ni know"
+)
+
+PosPredData%>%mutate(ReScale=case_when(
+            Scale!="Thrill_Seeking"~"Undesirable",
+            Scale=="Thrill_Seeking"~"Desirable")
+                                 )%>%
+group_by(ReScale,subject,LinearAgeTrans,QuadraticAgeTrans,Risk,HowMany,ActualAge)%>%
+  gather(key = "Category", value = "mean",P_Recom_0,P_Recom_1,P_Recom_2,P_Recom_3,P_Recom_4,P_HowOften_0,P_HowOften_1,P_HowOften_2,P_HowOften_3,P_HowOften_4)%>%filter(Category=="P_Recom_4" | Category=="P_HowOften_4")%>%
+  ggplot(aes(x = ActualAge, y= mean,color=Category,group=interaction(ReScale,Category))) +
+  geom_jitter(aes(shape=Category),alpha=0.3,size=0.1)+
+  stat_summary(aes(color=Category),geom="line",fun.y="mean",position=position_dodge(0.9),size=2)+
+  stat_summary(aes(shape=Category),geom="pointrange",fun.data="mean_cl_boot",position=position_dodge(0.9),color="black")+
+  scale_fill_discrete(name="p response = 4 | Others Engagement", breaks=c("P_HowOften_4","P_Recom_4"),labels=c("Engage", "Recommend"))+
+  scale_x_continuous(name="")+
+  scale_y_continuous(name="Response Probability")+
+  scale_shape_manual(name="",breaks=c("P_HowOften_4","P_Recom_4"),labels=c("\n Willingness to \n Engage \n","\n Willingness to \n Recommend \n"),values=c(0, 8))+
+  facet_grid(~HowMany,labeller = labeller(HowMany = Others))+
+  ggtitle("Undesirable Risks ~ Others x Age")+
+  coord_cartesian(ylim=c(0,0.6))+
+  theme(
+    axis.title = element_text(size=20, color="white"),
+    axis.text = element_text(size=17),
+    legend.text = element_text(size=17),
+    legend.title =element_text(size=20),
+    plot.title = element_text(size=25,hjust = 0.5),
+    legend.position = "none",
+    strip.text.x = element_text(margin = margin(.5, 0.2, .5, 0.2, "cm"),size=15),
+    strip.background = element_rect(
+      color="black", fill="white", size=2, linetype="solid"
+    )
+  )->PredcitionsPlotUndesirable
+
+
+######
+######
+##### Desdirable
+
+PosPredDataEng%>%mutate(ReScale=case_when(
+            Scale!="Thrill_Seeking"~"Undesirable",
+            Scale=="Thrill_Seeking"~"Desirable")
+                                 )%>%
+group_by(ReScale,subject,LinearAgeTrans,QuadraticAgeTrans,Risk,HowMany,ActualAge)%>%
+  gather(key = "Category", value = "mean",P_Recom_0,P_Recom_1,P_Recom_2,P_Recom_3,P_Recom_4,P_HowOften_0,P_HowOften_1,P_HowOften_2,P_HowOften_3,P_HowOften_4)%>%
+#  mutate(Category2=case_when(
+#    (Category=="P_Recom_4"|Category=="P_Recom_3"|Category=="P_Recom_2"|Category=="P_Recom_1"|Category=="P_Recom_0")~"Recom",
+#    (Category=="P_HowOften_4"|Category=="P_HowOften_3"|Category=="P_HowOften_2"|Category=="P_HowOften_1"|Category=="P_HowOften_0")~"HowOften"
+#  ))%>%
+  filter(Category=="P_Recom_4" | Category=="P_HowOften_4")%>%
+  ggplot(aes(x = ActualAge, y= mean,color=Category,group=interaction(ReScale,Category))) +
+  geom_jitter(aes(shape=Category),alpha=0.3,size=0.3)+
+  stat_summary(aes(color=Category),geom="line",fun.y="mean",position=position_dodge(0.9),size=2)+
+  stat_summary(aes(shape=Category),geom="pointrange",fun.data="mean_cl_boot",position=position_dodge(0.9),color="black")+
+  scale_color_discrete(name="response", breaks=c("P_HowOften_4","P_Recom_4"),labels=c("Engage", "Recommend"))+
+  scale_x_continuous(name="Age")+
+  scale_y_continuous(name="Response Probability")+
+  scale_shape_manual(name="",breaks=c("P_HowOften_4","P_Recom_4"),labels=c("\n Propensity to \n engage \n","\n Propensity to \n recommend \n"),values=c(0, 8))+
+  guides(shape=F, color = guide_legend(title.position = "top", title.vjust = 0.5)) +
+  #scale_shape_manual(name="",breaks=c("P_HowOften_4","P_Recom_4"),labels=c("\n Willingness to \n Engage \n","\n Willingness to \n Recommend \n"),values=c(0, 8))+
+  facet_grid(~HowMany,labeller = labeller(HowMany = Others))+
+  ggtitle("Desirable Risks ~ Others x Age")+
+  coord_cartesian(ylim=c(0,0.6))+
+  theme(
+    axis.title = element_text(size=20),
+    axis.text = element_text(size=17),
+    legend.text = element_text(size=12),
+    legend.title =element_text(size=12),
+    legend.spacing.x = unit(0.7, 'cm'),
+    plot.title = element_text(size=25,hjust = 0.5),
+    legend.position = "bottom",
+    strip.text.x = element_text(margin = margin(.5, 0.2, .5, 0.2, "cm"),size=15),
+    strip.background = element_rect(
+      color="black", fill="white", size=2, linetype="solid"
+    )
+  )->PredcitionsPlotDesirable
+
+legend <- ggdraw(get_legend(PredcitionsPlotDesirable))
+Jointplot<-cowplot::plot_grid(PredcitionsPlotUndesirable,PredcitionsPlotDesirable+theme(legend.position = "none"),legend,labels=c("a","b",""),
+                   nrow=3,rel_heights = c(1,1,0.1))
+
+
+y.grob <- textGrob("Posterior Response Probability", 
+                   gp=gpar(col="black", fontsize=17), rot=90)
+x.grob <- textGrob("Age", 
+                   gp=gpar(col="black", fontsize=17))
+
+#add to plot
+#grid.arrange(arrangeGrob(plot, left = y.grob))
+
+ggsave(plot=Jointplot,"X_Figures/Alltogether.png")#,width=15,height=7)
+
+PredcitionsPlotDesirable
+```
+
+
+# Make Power Analysis
+Because we really dont have many subjects we need to make sure that we can trust our regression results. 
+Power analysis is alien to Bayes, so we have to take a slightly different approach.
+We use the posterior predicted response probabilites from the cumulative model to simulate new responses.
+We do this n times. Then we check how many of these n times credible predictors turned out to be credible and by this infer the power for 
+each predictor.
+```{r}
+# get the predictions
+Predictions<-predict(MultivariateUnDesirableQuadraticC, newdata = newdata, re_formula = NULL,
+                     transform = NULL, allow_new_levels = TRUE, summary = TRUE,
+                     probs = c(0.025, 0.975), ntrys = 5)
+```
+
+Now i draw simulated responses from the probabilites obtained in the cumulative model.
+
+```{r}
+
+sim_d_and_fit <- function(seed, n) {
+  library(broom)
+  set.seed(seed)
+  PowerData$HowOften=NULL
+  PowerData$Recom=NULL
+  for (i in 1:length(PowerData$subject)){
+    PowerData$HowOften[i]=sample( 1:5, 1, replace=TRUE, prob=Predictions[i,,2] )
+    PowerData$Recom[i]=sample( 1:5, 1, replace=TRUE, prob=Predictions[i,,1] )
+  }
+  
+  update(MultivariateUnDesirableQuadraticC,newdata=PowerData,cores=4,chains=4,iter=100, seed = seed,control = list(adapt_delta=0.8,max_treedepth=10))%>% 
+    tidy(prob = .95)
+}
+#Now iterate 100 times once more.
+
+n_sim=10
+
+s3 <-
+  tibble(seed = 1:n_sim) %>% 
+  mutate(tidy = map(seed, sim_d_and_fit)) %>% 
+  unnest(tidy)
+
+
+```
+
+
+
+
+# Fit Cumulative Model
+
+Ok but of ourse we need to judge if there is some reliable difference going on, eventhough the effect size postieriors are a pretty good hint.
+So in what follows, i fit a bayesian random effects model in order to **predict the willingness to engage and the willingness to recommend**. Now i assume a Cumulative link family.
+According to everybody in my office and Ruben and even to Paul Brückner is the [right thing to do](https://kevinstadler.github.io/blog/bayesian-ordinal-regression-with-random-effects-using-brms/).
+I included random intercepts per subject and scale, i keep the Riskieness rating and the amout of others that engage in this behavior. and fit them as seperate models. Formulas are specifed down here.
+The Models crashed and the sampler diverged before, as i transformed the age regressor to be on the same scale as the responses. Now i use the raw values that come out of R`s poly function and it actually looks much better. I ran another multivariate model where i allow the resudals of the random effects to be correlated for both predictors and i standardized the age predictor.
+During the retreat i had a long discussion with ruben about this. it solves my convergence issues. If we dont fit multivariate we kinda implicitly get the wierd assumption that willingness to engage and to recommend should be uncorrelated within subject.
+
+In the paper it said 200000 iterations. which is also what we did but i wouldnt recommend it if you dont have acess to a high performance computing cluster and dont want your computer to be busy for 10 weeks or sth. I sugest using the [terminal or a cluster](./fitModelsCluster.R) for it because this hijacks the r session for quite some time.
+
+```{r echo=FALSE,results='hide'}
+fitAgain=FALSE
+
+if (fitAgain==TRUE){
+	MultiNoThrill <-  brm(
+	  formula = mvbind(Recom,HowOften)~Risk+sex+HowMany*LinearAgeTrans+(1|p|subject)+(1|Scale),
+	  data = normalEng[normalEng$Scale!="Thrill_Seeking",],
+	  family="cumulative",
+	  # this next line is only to keep the example small in size!
+      chains = 6, cores = 6,init=0, iter = 1000,control = list(adapt_delta = 0.9999999999, stepsize = 0.01, max_treedepth = 10)
+	  )
+  saveRDS(MultiNoThrill,file="../ModelFits/MultiNoThrillSeekLinMapC.rds")
+  
+	MultiNoThrillQ <-  brm(
+	  formula = mvbind(Recom,HowOften)~Risk+sex+HowMany*LinearAgeTrans+HowMany*QuadraticAgeTrans+(1|p|subject)+(1|Scale),
+	  data = normalEng[normalEng$Scale=="Thrill_Seeking",],
+	  family="cumulative",
+	  # this next line is only to keep the example small in size!
+      chains = 6, cores = 6,init=0, iter = 1000,control = list(adapt_delta = 0.9999999999, stepsize = 0.01, max_treedepth = 10)
+	  )
+  saveRDS(MultiNoThrillQ,file="../ModelFits/MultiThrillSeekQuadLinLinMapC.rds")
+  
+	MultiNoThrillQ <-  brm(
+	  formula = mvbind(Recom,HowOften)~Risk+sex+HowMany*LinearAgeTrans+HowMany*QuadraticAgeTrans+(1|p|subject)+(1|Scale),
+	  data = normalEng[normalEng$Scale!="Thrill_Seeking",],
+	  family="cumulative",
+	  # this next line is only to keep the example small in size!
+      chains = 6, cores = 6,init=0, iter = 1000,control = list(adapt_delta = 0.9999999999, stepsize = 0.01, max_treedepth = 10))
+	   
+	  saveRDS(MultiNoThrillQ,file="../ModelFits/MultiNoThrillSeekQuadLinLinMapC.rds")
+
+  
+  ##### Model Comparison Stuff. Here i define a pure Random effects model and a Pure Main effects model and cross my fingers that the other models are always better.
+ MultiNoThrillQ <-  brm(
+    formula = mvbind(Recom,HowOften)~Risk+sex+HowMany*QuadraticAgeTrans+(1|p|subject)+(1|Scale),
+    data = normalEng[normalEng$Scale=="Thrill_Seeking",],
+    family="cumulative",
+    # this next line is only to keep the example small in size!
+    chains = 6, cores = 6,init=0, iter = 1000,control = list(adapt_delta = 0.9999999999, stepsize = 0.01, max_treedepth = 10)
+	)
+  saveRDS(MultiNoThrillQ,file="../ModelFits/MultiThrillSeekQuadLinMapC.rds")
+  
+  MultiNoThrillQ <-  brm(
+    formula = mvbind(Recom,HowOften)~Risk+sex+HowMany*QuadraticAgeTrans+(1|p|subject)+(1|Scale),
+    data = normalEng[normalEng$Scale!="Thrill_Seeking",],
+    family="cumulative",
+    # this next line is only to keep the example small in size!
+    chains = 6, cores = 6,init=0, iter = 1000,control = list(adapt_delta = 0.9999999999, stepsize = 0.01, max_treedepth = 10)
+	)
+  saveRDS(MultiNoThrillQ,file="../ModelFits/MultiNoThrillSeekQuadLinMapC.rds")
+  
+	MultiThrill <-  brm(
+	  formula = mvbind(Recom,HowOften)~Risk+sex+HowMany*LinearAgeTrans+(1|p|subject)+(1|Scale),
+	  data = normalEng,
+	  family="cumulative",
+	  # this next line is only to keep the example small in size!
+      chains = 6, cores = 6,init=0, iter = 1000,control = list(adapt_delta = 0.9999999999, stepsize = 0.01, max_treedepth = 10)
+	  )
+  saveRDS(MultiThrill,file="../ModelFits/MultiLinMapC.rds")
+  
+	MultiNoThrillQ <-  brm(
+	  formula = mvbind(Recom,HowOften)~Risk+sex+HowMany*LinearAgeTrans+HowMany*QuadraticAgeTrans+(1|p|subject)+(1|Scale),
+	  data = normalEng,
+	  family="cumulative",
+	  # this next line is only to keep the 40000 small in size!
+      chains = 6, cores = 6,init=0, iter = 1000,control = list(adapt_delta = 0.9999999999, stepsize = 0.01, max_treedepth = 10)
+	  )
+  saveRDS(MultiNoThrillQ,file="../ModelFits/MultiQuadLinLinMapC.rds")
+  
+  MultiNoThrillQ <-  brm(
+    formula = mvbind(Recom,HowOften)~Risk+sex+HowMany*QuadraticAgeTrans+(1|p|subject)+(1|Scale),
+    data = normalEng,
+    family="cumulative",
+    # this next line is only to keep the example small in size!
+    chains = 6, cores = 6,init=0, iter = 1000,control = list(adapt_delta = 0.9999999999, stepsize = 0.01, max_treedepth = 10)
+	)
+  saveRDS(MultiNoThrillQ,file="../ModelFits/MultiQuadLinMapC.rds")
+  
+  
+}else{
+  #recommend loading
+  MultivariateUndesirableLinear<-readRDS("B_ModelFits/MultiNoThrillSeekLinMapC.rds")
+  MultivariateUndesirableQuadratic<-readRDS("B_ModelFits/MultiNoThrillSeekQuadLinMapC.rds")
+  MultivariateUndesirableLinearQuadratic<-readRDS("B_ModelFits/MultiNoThrillSeekQuadLinLinMapC.rds")
+
+  MultivariateDesirableLinear<-readRDS("B_ModelFits/MultiThrillSeekLinMapC.rds")
+  MultivariateDesirableQuadratic<-readRDS("B_ModelFits/MultiThrillSeekQuadLinMapC.rds")
+  MultivariateDesirableLinearQuadratic<-readRDS("B_ModelFits/MultiThrillSeekQuadLinLinMapC.rds")
+}
+
+```
+
+
+# Model Comparison
+I use aproximate loo in order to compare the models and judge if i should include the age regressors
+
+## Non Desirable
+```{r}
+  Linear_Undesirable_Loo<-loo(MultivariateUndesirableLinear)
+  save(Linear_Undesirable_Loo,file="B_ModelFits/Linear_Undesirable_Loo.rds")
+  
+  Quadratic_Undesirable_Loo<-loo(MultivariateUndesirableQuadratic)
+  save(Quadratic_Undesirable_Loo,file="B_ModelFits/Quadratic_Undesirable_Loo.rds")
+  
+  Both_Undesirable_Loo<-loo(MultivariateUndesirableLinearQuadratic)
+  save(Both_Undesirable_Loo,file="B_ModelFits/Both_Undesirable_Loo.rds")
+  
+  Linear_Desirable_Loo<-loo(MultivariateDesirableLinear)
+  save(Linear_Desirable_Loo,file="B_ModelFits/Linear_Desirable_Loo.rds")
+  
+  Quadratic_Desirable_Loo<-loo(MultivariateDesirableQuadratic)
+  save(Quadratic_Desirable_Loo,file="B_ModelFits/Quadratic_Desirable_Loo.rds")
+  
+  Both_Desirable_Loo<-loo(MultivariateDesirableLinearQuadratic)
+  save(Both_Desirable_Loo,file="B_ModelFits/Both_Desirable_Loo.rds")
+  
+  
+  #### here i actually compare the models:
+  
+  #compare(Linear_Undesirable_Loo,Quadratic_Undesirable_Loo,Both_Undesirable_Loo)
+
+  	
+```
+
+##Desirable
+
+```{r}
+  compare(Linear_Desirable_Loo,Quadratic_Desirable_Loo,Both_Desirable_Loo)
+```
+
+# Is there a correlation between age and Risk Rating?
+
+There is one, it is small, but significant.
+
+For the record:
+The total correlation us -.13 and there is a negative age*riskrating correlation present for all subscales, gighest in rebellious behaviors.
+
+```{r}
+Correlation<-Hmisc::rcorr(as.numeric(ARQs$age),as.numeric(ARQs$Risk),type = "spearman")[[1]][1,2]
+
+Corrs<-ggplot(ARQs,aes(x=age,y=Risk))+geom_jitter(aes(color=Scale))+#+geom_smooth(method="lm",size=3,color="red")+
+  geom_smooth(aes(group=Scale,color=Scale),method="lm",size=2)+
+  scale_color_viridis_d()+
+  annotate("text", label =paste(round(Correlation,2),"***"), x = 20, y = 1.5, size = 8, colour = "red")+theme_cowplot()
+
+ggsave(Corrs,filename = "X_Figures/Supplement_Corrs.tiff")
+```
+
+
+#PostHoc
+Here i am interested on how different agegroups estimate others engagement.
+
+## How do people judge others engagement?
+
+```{r eval=FALSE,include=FALSE,echo=FALSE}
+
+normalEng%>%select(HowOften,Recom,DiffEng,NormalizedDiffEng,HowMany,subject,age,sex,Scale,Bin,Presence,SubScale)%>%
+  mutate(DiffHowOf=HowMany-HowOften)%>%mutate(DiffHowOfM=(DiffHowOf-mean(DiffHowOf))/sd(DiffHowOf))%>%filter(Presence=="A")%>%
+  ggplot(aes(y=(as.numeric(DiffHowOfM)),x=as.numeric(age)))+
+  #geom_rect(aes(xmin=14.5,xmax=21.5,ymin=-Inf,ymax=Inf), fill = "grey",alpha=0.01)+
+  #geom_jitter(aes(color=DiffHowOfM>0),alpha=0.1)+
+  geom_hline(aes(yintercept=0),linetype="dotdash")+
+  scale_x_continuous(name="age")+
+  scale_y_continuous(name="z-score")+
+  stat_smooth(method="loess",color="black")+
+  scale_color_discrete(name="",breaks=c("FALSE","TRUE"),labels=c("Underestimation","Overestimation"))+
+ # coord_cartesian(ylim=c(-4,4))+
+  #ggtitle("Normalized difference:",subtitle ="Self reported engagement vs.\nestimate of others engagement")+
+  stat_summary(fun.data = mean_cl_boot, geom = "pointrange",position=position_dodge(1),size=0.3)
+  #guides(color=FALSE)
+
+ggsave("X_Figures/Overestimation.png",height=4,width=4)
+```
+
+# Post Hoc Power -> Desirable Behaviors
+ Here i read in the summarized regression models and evaluate bayesfactors of the effects reported by us.
+
+```{r}
+PowerList=list()
+for(i in 1:100){
+  PowerList[[i]]=read_rds(paste0("C_PowerAnalysis/iterDesirable",i,".rds"))
+}
+PowerListDesAll=dplyr::bind_rows(PowerListUndes)
+# Risk was negative.
+ PowerListDesAll%>%filter(term == "b_Recom_Risk") %>% 
+    mutate(check = ifelse(upper < 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+ 
+#How many was positive   
+  PowerListDesAll%>%filter(term == "b_Recom_HowMany") %>% 
+    mutate(check = ifelse(lower > 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+  
+#Linear Age was positive    
+  PowerListDesAll%>%filter(term == "b_Recom_LinearAgeTrans") %>% 
+    mutate(check = ifelse(lower > 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+
+# Quadratic Age was positive      
+    PowerListDesAll%>%filter(term == "b_Recom_QuadraticAgeTrans") %>% 
+    mutate(check = ifelse(lower > 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+    
+#Interaction was negative
+  PowerListDesAll%>%filter(term == "b_Recom_HowMany:LinearAgeTrans") %>% 
+    mutate(check = ifelse(upper < 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+  
+#Interaction was negative
+  PowerListDesAll%>%filter(term == "b_Recom_HowMany:QuadraticAgeTrans") %>% 
+    mutate(check = ifelse(upper < 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+    
+  
+  #####
+  ##### HOW OFTEN
+  #####
+# Risk was negative.
+ PowerListDesAll%>%filter(term == "b_HowOften_Risk") %>% 
+    mutate(check = ifelse(upper < 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+ 
+#How many was positive   
+ PowerListDesAll%>%filter(term == "b_HowOften_HowMany") %>% 
+    mutate(check = ifelse(lower > 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+  
+h <- hypothesis(MultivariateDesirableQuadraticC, "HowOften_HowMany > 0")
+h2 <- hypothesis(MultivariateDesirableQuadraticC, "HowOften_Risk < 0")
+
+h3 <- hypothesis(MultivariateDesirableQuadraticC, "Recom_Risk < 0")
+h4 <- hypothesis(MultivariateDesirableQuadraticC, "Recom_LinearAgeTrans > 0")
+h5 <- hypothesis(MultivariateDesirableQuadraticC, "Recom_QuadraticAgeTrans > 0")
+h6 <- hypothesis(MultivariateDesirableQuadraticC, "Recom_HowMany:LinearAgeTrans < 0")
+h7 <- hypothesis(MultivariateDesirableQuadraticC, "Recom_HowMany:QuadraticAgeTrans < 0")
+
+
+```
+
+# Post Hoc Power -> Undesirable Age
+ Here i read in the summarized regression models and evaluate bayesfactors of the effects reported by us.
+```{r}
+library(tidyverse)
+PowerListUndes=list()
+for(i in 1:100){
+  PowerListUndes[[i]]=read_rds(paste0("C_PowerAnalysis/iterUnDesirable",i,".rds"))
+}
+
+PowerListUndesAll=dplyr::bind_rows(PowerListUndes)
+# Risk was negative.
+print("Power Recom")
+ PowerListUndesAll%>%filter(term == "b_Recom_Risk") %>% 
+    mutate(check = ifelse(upper < 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+
+ print("Power Howmany")
+#How many was positive   
+  PowerListUndesAll%>%filter(term == "b_Recom_HowMany") %>% 
+    mutate(check = ifelse(lower > 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+
+  print("Power Age^2")
+# Quadratic Age was positive      
+    PowerListUndesAll%>%filter(term == "b_Recom_QuadraticAgeTrans") %>% 
+    mutate(check = ifelse(lower > 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+    
+  print("Power Howmany:Age^2")  
+#Interaction was negative
+  PowerListUndesAll%>%filter(term == "b_Recom_HowMany:QuadraticAgeTrans") %>% 
+    mutate(check = ifelse(lower < 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+  
+    
+  #####
+  ##### HOW OFTEN
+  #####
+  print("Power Risk how often")
+# Risk was negative.
+ PowerListUndesAll%>%filter(term == "b_HowOften_Risk")%>% 
+    mutate(check = ifelse(upper < 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+ 
+  print("Power HowMany how often")
+#How many was positive   
+  PowerListUndesAll%>%filter(term == "b_HowOften_HowMany") %>% 
+    mutate(check = ifelse(lower > 0, 1, 0)) %>% 
+    summarise(power = mean(check))
+  
+h8 <- hypothesis(MultivariateUnDesirableQuadraticC, "HowOften_HowMany > 0")
+h9 <- hypothesis(MultivariateUnDesirableQuadraticC, "HowOften_Risk < 0")
+
+h10 <- hypothesis(MultivariateUnDesirableQuadraticC, "Recom_Risk < 0")
+h11 <- hypothesis(MultivariateUnDesirableQuadraticC, "Recom_QuadraticAgeTrans > 0")
+h12 <- hypothesis(MultivariateUnDesirableQuadraticC, "Recom_HowMany:QuadraticAgeTrans < 0")
+
+
+```
+
+
+## PostHoc test: Does quadratic Age contribute to that?
+
+here we want to know whether these there is an agetrend in estimating the social norm.
+```{r}
+normalEngOrdered<-normalEng%>%mutate(HowMany=ordered(HowMany, levels = c("0", "1", "2", "3","4")))
+  
+  MultiThrillHowMany <-  brm(
+    formula = HowMany~QuadraticAgeTrans+(1|subject)+(1|Scale),
+    data = normalEngOrdered,#[normalEng$Scale=="Thrill_Seeking",],
+    family="cumulative",
+    # this next line is only to keep the example small in size!
+    chains = 4, cores = 4,init=0, iter = 10000,control = list(adapt_delta=0.9999,stepsize=0.00001,max_treedepth=30))
+  
+```
+
+
+# Reviwes
+```{r}
+
+#shit simon, you saved the imputed datasets under the wrong name. 
+IQ_Thrill<-readRDS("../ModelFits/MultiNoThrillSeekQuadLinMapC_IQ.rds")
+IQ_NoThrill<-readRDS("../ModelFits/MultiThrillSeekQuadLinMapC_IQ.rds")
+
+NoAgeThrill<-readRDS("../ModelFits/MultiNoAgeThrill.rds")
+NoAgeNoThrill<-readRDS("../ModelFits/MultiNoAgeNoThrill.rds")
+
+looIQThrill=loo(IQ_Thrill)
+looIQNoThrill=loo(IQ_NoThrill)
+#looriskageina=loo(Risk_AgeIna)
+LooNoAgeThrill=loo(NoAgeThrill)
+LooNoAgeNoThrill=loo(NoAgeNoThrill)
+
+loo_compare(LooNoAgeThrill,looIQThrill,Both_Desirable_Loo,Linear_Desirable_Loo,Quadratic_Desirable_Loo)
+loo_compare(LooNoAgeNoThrill,looIQNoThrill,Both_Undesirable_Loo,Linear_Undesirable_Loo,Quadratic_Undesirable_Loo)
+
+```
+
+# Plot Risk Model.
+```{r, fig.height=5,fig.width=10}
+
+library(tidybayes,bayesplot)
+#Factors=c("b_HowMany","b_Risk","b_sexWeiblich","")
+Factors=parnames(IQ_Thrill)
+posteriorThrill<-as.array(IQ_Thrill)
+color_scheme_set("gray")
+RecomThrill<-bayesplot::mcmc_areas_data(
+  posteriorThrill, 
+  pars = Factors[c(14:16,19:24)],
+  prob = 0.5, # 80% intervals
+  prob_outer = 0.95, # 99%
+  point_est = "mean"
+)%>%mutate(
+  Caption="Recom",
+  Scale="Desirable"
+)
+
+EngThrill<-bayesplot::mcmc_areas_data(
+  posteriorThrill, 
+  pars = Factors[c(30:32,35:40)],
+  prob = 0.5, # 80% intervals
+  prob_outer = 0.95, # 99%
+  point_est = "mean"
+)%>%mutate(
+  Caption="Engage",
+  Scale="Desirable"
+)
+
+EngThrill1<-EngThrill%>%rowwise()%>%mutate(parameter=as.character(parameter)%>%strsplit(split="_")%>%.[[1]]%>%.[3])
+RecomThrill1<-RecomThrill%>%rowwise()%>%mutate(parameter=as.character(parameter)%>%strsplit(split="_")%>%.[[1]]%>%.[3])
+
+datas<-rbind(RecomThrill1,EngThrill1)  
+
+
+ggplot(datas, aes(x = parameter, y = x, color=Caption, group=interaction(Caption,parameter))) + #geom_violin(position=position_dodge(1))+
+  geom_hline(yintercept = 0,linetype="dotdash",size=1)+
+  stat_summary(fun.y = mean, fun.ymin = min, fun.ymax = max,geom = "pointrange",aes(shape=Caption), size= 1.2, position=position_dodge(0.3))+
+  xlab("Regression Weight Estimate")+
+  ylab("Predictor")+ggtitle("Desirable")+
+  coord_flip()+theme_cowplot()
+ # stat_summary(fun.y = "mean",geom = "point",shape=2,position=position_dodge(0.9))
+
+
+
+#Factors=c("b_HowMany","b_Risk","b_sexWeiblich","")
+Factors=parnames(IQ_NoThrill)
+posteriorNoThrill<-as.array(IQ_NoThrill)
+color_scheme_set("gray")
+RecomNoThrill<-bayesplot::mcmc_areas_data(
+  posteriorNoThrill, 
+  pars = Factors[c(14:16,19:24)],
+  prob = 0.5, # 80% intervals
+  prob_outer = 0.95, # 99%
+  point_est = "mean"
+)%>%mutate(
+  Caption="Recom",
+  Scale="Undesirable"
+)
+
+EngNoThrill<-bayesplot::mcmc_areas_data(
+  posteriorNoThrill, 
+  pars = Factors[c(30:32,35:40)],
+  prob = 0.5, # 80% intervals
+  prob_outer = 0.95, # 99%
+  point_est = "mean"
+)%>%mutate(
+  Caption="Engage",
+  Scale="Undesirable"
+)
+
+EngNoThrill1<-EngNoThrill%>%rowwise()%>%mutate(parameter=as.character(parameter)%>%strsplit(split="_")%>%.[[1]]%>%.[3])
+RecomNoThrill1<-RecomNoThrill%>%rowwise()%>%mutate(parameter=as.character(parameter)%>%strsplit(split="_")%>%.[[1]]%>%.[3])
+
+data_Des_Undes<-rbind(RecomNoThrill1,EngNoThrill1,datas)  
+
+
+ggplot(data_Des_Undes, aes(x = parameter, y = x, color=Caption, group=interaction(Caption,parameter))) + #geom_violin(position=position_dodge(1))+
+  geom_hline(yintercept = 0,linetype="dotdash",size=1)+
+  stat_summary(fun.y = mean, fun.ymin = min, fun.ymax = max,geom = "pointrange",aes(shape=Caption), size= 1.2, position=position_dodge(0.3))+
+  xlab("Regression Weight Estimate")+
+  ylab("Predictor")+#ggtitle("Undesirable")+
+  coord_flip()+theme_cowplot()+
+  facet_grid(.~Scale)
+ # stat_summary(fun.y = "mean",geom = "point",shape=2,position=position_dodge(0.9))
+
+
+
+ggsave(ThrillWithoutRec,filename = "X_Figures/RecWithoutThrill.pdf",width = 10,height = 5)
+print(ThrillWithoutRec)
+
+```
+# Here we look at it alltogether
+
+```{r, fig.height=5,fig.width=10}
+
+library(tidybayes)
+
+posteriorThrill<-as.array(AllQuad)
+color_scheme_set("gray")
+EngageWithoutThrill<-mcmc_areas_data(
+  posteriorThrill, 
+  pars = Factors,
+  prob = 0.5, # 80% intervals
+  prob_outer = 0.95, # 99%
+  point_est = "mean"
+)%>%mutate(
+  Caption="Engage",
+  Scale="All"
+)
+
+posteriorThrillRec<-as.array(AllQuadRec)
+ThrillWithoutRec<-mcmc_areas_data(
+  posteriorThrillRec, 
+  pars = Factors,
+  prob = 0.5, # 80% intervals
+  prob_outer = 0.95, # 99%
+  point_est = "mean"
+)%>%mutate(
+  Caption="Recommend",
+  Scale="All"
+)
+
+datas<-rbind(EngageWithoutThrill,ThrillWithoutRec)  
+
+
+ThrillWithoutRec<-ggplot(datas, aes(x = parameter, y = x, color=Caption, group=interaction(Caption,parameter))) + #geom_violin(position=position_dodge(1))+
+  stat_summary(fun.y = mean, fun.ymin = min, fun.ymax = max,geom = "pointrange",aes(shape=Caption), size= 1.2, position=position_dodge(0.3))+
+  geom_hline(yintercept = 0, alpha=0.3,linetype="dotdash")+
+  xlab("Regression Weight Estimate")+
+  ylab("Predictor")+
+  coord_flip()
+ # stat_summary(fun.y = "mean",geom = "point",shape=2,position=position_dodge(0.9))
+
+ggsave(ThrillWithoutRec,filename = "X_Figures/RecWithoutThrill.pdf",width = 10,height = 5)
+print(ThrillWithoutRec)
+
+```

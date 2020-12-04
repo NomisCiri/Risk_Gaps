@@ -1,0 +1,6 @@
+Response forwards	[4, 6]	[3, 8, 6]	[6, 1, 2]	[3, 4, 1, 7]	[6, 1, 5, 8]	[8, 3, 4, 9]	[5, 1, 8, 6]	
+Correct	1	1	1	1	1	0	0	
+Response backwards	[1, 2]	[3, 1]	[5, 3]	[4, 6]	[4, 7, 5]	[9, 2, 5]	[6, 9, 2, 7]	[3, 9, 4, 8]	[7, 5, 3, 4]	[2, 5, 7, 9]	
+Correct backwards	1	1	1	1	1	0	1	1	0	0	
+Score Forwards	6	
+Score Backwards	9	

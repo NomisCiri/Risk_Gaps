@@ -1,0 +1,20 @@
+Zahlensequenzen [RÜCKWÄRTS]
+
+
+Dir werden jetzt Zahlensequenzen über Kopfhörer vorgelesen.
+
+Du sollst dann die Zahlensequenz RÜCKWÄRTS eingeben.
+
+
+Zum Beispiel, wenn Du "4, 1" hörst, sollst Du "1, 4" eingeben.
+
+
+Du musst Deine Maus benutzen und auf den virtuellen Nummernblock klicken.
+
+
+Bitte Kopfhörer aufsetzen. Das erste Beispiel fängt jetzt an...
+
+
+
+
+Eingabetaste drücken, um fortzufahren

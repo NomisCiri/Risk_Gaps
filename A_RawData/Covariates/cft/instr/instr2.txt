@@ -1,0 +1,9 @@
+Du wirst jetzt wieder ein Kasten gezeigt aus mehreren Kästchen.
+
+Ein Kästchen fehlt UND ein Kästchen wurde ausgerissen!
+
+Du musst aber nur das fehlenende Kästchen ersetzten.
+
+Kannst Du das Beispiel lösen? Die Antwort ist C!
+
+Wenn Du noch Fragen hast, zögere nicht, uns zu Fragen!
