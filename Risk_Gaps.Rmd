@@ -695,23 +695,27 @@ group_by(ReScale,subject,LinearAgeTrans,QuadraticAgeTrans,Risk,HowMany,ActualAge
   geom_jitter(aes(shape=Category),alpha=0.3,size=0.1)+
   stat_summary(aes(color=Category),geom="line",fun.y="mean",position=position_dodge(0.9),size=2)+
   stat_summary(aes(shape=Category),geom="pointrange",fun.data="mean_cl_boot",position=position_dodge(0.9),color="black")+
-  scale_fill_discrete(name="p response = 4 | Others Engagement", breaks=c("P_HowOften_4","P_Recom_4"),labels=c("Engage", "Recommend"))+
+  scale_color_discrete(name="Propensity to...       ", breaks=c("P_HowOften_4","P_Recom_4"),labels=c("Engage", "Recommend"))+
   scale_x_continuous(name="")+
   scale_y_continuous(name="Response Probability")+
   scale_shape_manual(name="",breaks=c("P_HowOften_4","P_Recom_4"),labels=c("\n Willingness to \n Engage \n","\n Willingness to \n Recommend \n"),values=c(0, 8))+
   facet_grid(~HowMany,labeller = labeller(HowMany = Others))+
+  guides(shape=F, color = guide_legend(title.position = "top", title.vjust = 0.5)) +
   ggtitle("Undesirable Risks ~ Others x Age")+
   coord_cartesian(ylim=c(0,0.6))+
   theme(
-    axis.title = element_text(size=20, color="white"),
+    axis.title = element_text(size=20),
     axis.text = element_text(size=17),
-    legend.text = element_text(size=17),
-    legend.title =element_text(size=20),
+    legend.text = element_text(size=12),
+    legend.title =element_text(size=12),
     plot.title = element_text(size=25,hjust = 0.5),
-    legend.position = "none",
+    legend.position = c(0.01, 0.86),
+    legend.background = element_rect(fill="white",
+                                  size=1, linetype="dotted", 
+                                  colour ="white"),
     strip.text.x = element_text(margin = margin(.5, 0.2, .5, 0.2, "cm"),size=15),
     strip.background = element_rect(
-      color="black", fill="white", size=2, linetype="solid"
+      color="white", fill="grey", size=2, linetype="solid"
     )
   )->PredcitionsPlotUndesirable
 
@@ -754,13 +758,13 @@ group_by(ReScale,subject,LinearAgeTrans,QuadraticAgeTrans,Risk,HowMany,ActualAge
     legend.position = "bottom",
     strip.text.x = element_text(margin = margin(.5, 0.2, .5, 0.2, "cm"),size=15),
     strip.background = element_rect(
-      color="black", fill="white", size=2, linetype="solid"
+      color="white", fill="grey", size=2, linetype="solid"
     )
   )->PredcitionsPlotDesirable
 
 legend <- ggdraw(get_legend(PredcitionsPlotDesirable))
-Jointplot<-cowplot::plot_grid(PredcitionsPlotUndesirable,PredcitionsPlotDesirable+theme(legend.position = "none"),legend,labels=c("a","b",""),
-                   nrow=3,rel_heights = c(1,1,0.1))
+Jointplot<-cowplot::plot_grid(PredcitionsPlotUndesirable,PredcitionsPlotDesirable+theme(legend.position = "none"),labels=c("a","b"),
+                   nrow=2,rel_heights = c(1,1))
 
 
 y.grob <- textGrob("Posterior Response Probability", 
@@ -771,7 +775,7 @@ x.grob <- textGrob("Age",
 #add to plot
 #grid.arrange(arrangeGrob(plot, left = y.grob))
 
-ggsave(plot=Jointplot,"X_Figures/Alltogether.png")#,width=15,height=7)
+ggsave(plot=Jointplot,"X_Figures/Alltogether.png",width=12,height=10)
 
 PredcitionsPlotDesirable
 ```
@@ -1259,7 +1263,7 @@ ggplot(data_Des_Undes, aes(x = parameter, y = x, color=Caption, group=interactio
 
 
 
-ggsave(ThrillWithoutRec,filename = "X_Figures/RecWithoutThrill.pdf",width = 10,height = 5)
+ggsave(filename = "X_Figures/RecWithoutThrill.png",width = 10,height = 5)
 print(ThrillWithoutRec)
 
 ```
